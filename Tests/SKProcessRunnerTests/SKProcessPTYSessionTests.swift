@@ -369,6 +369,21 @@ enum SKPTestTerminalState {
     case osc
 }
 
+final class SKPTestFlag {
+    private let lock = NSLock()
+    private var value = false
+
+    func setTrue() {
+        lock.lock(); defer { lock.unlock() }
+        value = true
+    }
+
+    func isTrue() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return value
+    }
+}
+
 final class SKProcessPTYSessionTests: XCTestCase {
     func testPTYSessionEcho() async throws {
 #if os(macOS)
@@ -441,14 +456,17 @@ final class SKProcessPTYSessionTests: XCTestCase {
         let screen = SKPTestTerminalScreen(rows: 24, cols: 80)
         var hasModelList = false
         var sentExit = false
-        var sentModelAttempts = 0
-        var lastModelSend = Date.distantPast
+        var sentModel = false
+        let hasModelListFlag = SKPTestFlag()
+        var retryTask: Task<Void, Never>? = nil
         var sawModelDisabledMessage = false
         var sawReadyModel = false
         var sawPrompt = false
         let start = Date()
         let deadline = Date().addingTimeInterval(45)
         var handledCursorQueryCount = 0
+        var lastScreenText = ""
+        var lastScreenChange = Date()
 
         for await chunk in stream {
             output.append(chunk)
@@ -456,6 +474,10 @@ final class SKProcessPTYSessionTests: XCTestCase {
             let current = String(decoding: output, as: UTF8.self)
             let clean = stripANSI(current)
             let screenText = screen.renderedText()
+            if screenText != lastScreenText {
+                lastScreenText = screenText
+                lastScreenChange = Date()
+            }
             if handledCursorQueryCount < 3 {
                 if outputContainsCursorPositionQuery(output) {
                     handledCursorQueryCount += 1
@@ -487,20 +509,34 @@ final class SKProcessPTYSessionTests: XCTestCase {
                 sawPrompt = true
             }
 
-            if (sawReadyModel || (sawModelDisabledMessage && modelReady) || Date().timeIntervalSince(start) > 3.0)
-                && (sawPrompt || Date().timeIntervalSince(start) > 3.0) {
-                if sentModelAttempts < 6, Date().timeIntervalSince(lastModelSend) > 2.0 {
-                    sentModelAttempts += 1
-                    lastModelSend = Date()
-                    sawPrompt = false
+            if !sentModel,
+               (sawReadyModel || (sawModelDisabledMessage && modelReady) || Date().timeIntervalSince(start) > 5.0),
+               sawPrompt,
+               (Date().timeIntervalSince(lastScreenChange) >= 0.8 || Date().timeIntervalSince(start) > 5.0) {
+                sentModel = true
+                sawPrompt = false
+                do {
+                    print("Codex /model send")
+                    let clearAndModel = "\u{15}/model\r"
+                    try await session.send(Data(clearAndModel.utf8))
+                } catch {
+                    let message = String(describing: error)
+                    if !message.contains("errno 5") {
+                        throw error
+                    }
+                }
+                retryTask?.cancel()
+                retryTask = Task {
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    if hasModelListFlag.isTrue() { return }
                     do {
-                        print("Codex /model send attempt \(sentModelAttempts)")
+                        print("Codex /model retry")
                         let clearAndModel = "\u{15}/model\r"
                         try await session.send(Data(clearAndModel.utf8))
                     } catch {
                         let message = String(describing: error)
                         if !message.contains("errno 5") {
-                            throw error
+                            return
                         }
                     }
                 }
@@ -508,12 +544,16 @@ final class SKProcessPTYSessionTests: XCTestCase {
             if !hasModelList {
                 if clean.contains("Select Model and Effort") || screenText.contains("Select Model and Effort") {
                     hasModelList = true
+                    hasModelListFlag.setTrue()
                 } else if clean.contains("1. gpt-") || clean.contains("2. gpt-") {
                     hasModelList = true
+                    hasModelListFlag.setTrue()
                 } else if clean.contains("1. o1") || clean.contains("2. o1") {
                     hasModelList = true
+                    hasModelListFlag.setTrue()
                 } else if screenText.contains("1. gpt-") || screenText.contains("2. gpt-") {
                     hasModelList = true
+                    hasModelListFlag.setTrue()
                 }
             }
             if hasModelList, !sentExit {
@@ -535,6 +575,7 @@ final class SKProcessPTYSessionTests: XCTestCase {
             }
         }
 
+        retryTask?.cancel()
         var finalOutput = output
         var didTimeout = false
         do {
