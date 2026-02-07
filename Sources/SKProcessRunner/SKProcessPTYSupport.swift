@@ -41,6 +41,8 @@ enum SKProcessPTYSupport {
             freeCStringArray(&envp)
         }
 
+        var pid: pid_t = 0
+#if canImport(Darwin)
         var fileActions: posix_spawn_file_actions_t? = nil
         posix_spawn_file_actions_init(&fileActions)
         defer { posix_spawn_file_actions_destroy(&fileActions) }
@@ -51,29 +53,53 @@ enum SKProcessPTYSupport {
             posix_spawn_file_actions_addclose(&fileActions, slave)
         }
         posix_spawn_file_actions_addclose(&fileActions, master)
-#if canImport(Darwin)
         if let cwd = configuration.cwd {
             _ = cwd.path.withCString { path in
                 posix_spawn_file_actions_addchdir_np(&fileActions, path)
             }
         }
-#endif
 
         var attrs: posix_spawnattr_t? = nil
         posix_spawnattr_init(&attrs)
         defer { posix_spawnattr_destroy(&attrs) }
-        var spawnFlags: Int16 = 0
-#if canImport(Darwin)
-        spawnFlags |= Int16(POSIX_SPAWN_SETSID)
-#endif
+        var spawnFlags: Int16 = Int16(POSIX_SPAWN_SETSID)
         posix_spawnattr_setflags(&attrs, spawnFlags)
 
-        var pid: pid_t = 0
         let spawnResult = argv.withUnsafeBufferPointer { argvBuf in
             envp.withUnsafeBufferPointer { envBuf in
-                posix_spawn(&pid, execPath, &fileActions, &attrs, argvBuf.baseAddress, envBuf.baseAddress)
+                guard let argvBase = argvBuf.baseAddress, let envBase = envBuf.baseAddress else {
+                    return ENOENT
+                }
+                return posix_spawn(&pid, execPath, &fileActions, &attrs, argvBase, envBase)
             }
         }
+#else
+        var fileActions = posix_spawn_file_actions_t()
+        posix_spawn_file_actions_init(&fileActions)
+        defer { posix_spawn_file_actions_destroy(&fileActions) }
+        posix_spawn_file_actions_adddup2(&fileActions, slave, STDIN_FILENO)
+        posix_spawn_file_actions_adddup2(&fileActions, slave, STDOUT_FILENO)
+        posix_spawn_file_actions_adddup2(&fileActions, slave, STDERR_FILENO)
+        if slave > STDERR_FILENO {
+            posix_spawn_file_actions_addclose(&fileActions, slave)
+        }
+        posix_spawn_file_actions_addclose(&fileActions, master)
+
+        var attrs = posix_spawnattr_t()
+        posix_spawnattr_init(&attrs)
+        defer { posix_spawnattr_destroy(&attrs) }
+        let spawnFlags: Int16 = 0
+        posix_spawnattr_setflags(&attrs, spawnFlags)
+
+        let spawnResult = argv.withUnsafeBufferPointer { argvBuf in
+            envp.withUnsafeBufferPointer { envBuf in
+                guard let argvBase = argvBuf.baseAddress, let envBase = envBuf.baseAddress else {
+                    return ENOENT
+                }
+                return posix_spawn(&pid, execPath, &fileActions, &attrs, argvBase, envBase)
+            }
+        }
+#endif
         if spawnResult != 0 {
             close(master)
             close(slave)
