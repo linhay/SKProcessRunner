@@ -117,11 +117,7 @@ public actor SKProcessPTYSession {
             ws_xpixel: 0,
             ws_ypixel: 0
         )
-    #if canImport(Darwin)
-        let ioctlResult = ioctl(masterFD, TIOCSWINSZ, &window)
-    #else
         let ioctlResult = ioctl(masterFD, UInt(TIOCSWINSZ), &window)
-    #endif
         if ioctlResult != 0 {
             throw SKProcessRunError.ptyFailed("TIOCSWINSZ failed with errno \(errno)")
         }
