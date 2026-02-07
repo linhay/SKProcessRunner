@@ -1,14 +1,203 @@
 # SKProcessRunner
 
-Small, dependency-light Swift wrapper around `Foundation.Process`:
+Small, dependency-light Swift wrapper around `Foundation.Process` with optional PTY support.
 
-- Resolve executables via `$PATH`
-- Run commands with `cwd` / `env`
-- Capture `stdout`/`stderr`
-- Timeout + output size cap (truncation)
-
-This package is intended to be shared by:
+Designed to be shared by:
 - `Decision` (Codex CLI runner)
 - `SKIntelligence` (`shell` tool)
 - `swift-git` (custom process runner)
 
+## Features
+- Resolve executables via `$PATH`
+- Run commands with `cwd` and `env` overrides
+- Capture `stdout` and `stderr`
+- Stream output while running
+- Timeout and output size caps (with truncation flag)
+- Optional PTY execution for TTY-required commands
+
+## Requirements
+- Swift 5.9+ (SwiftPM package)
+- Foundation
+
+PTY support is implemented for Darwin and Glibc. `SKProcessPTYSession` is only covered by tests on macOS.
+
+## Installation (SwiftPM)
+
+Add to your `Package.swift` dependencies:
+
+```swift
+.package(path: "../SKProcessRunner")
+```
+
+Then add the product to your target:
+
+```swift
+.product(name: "SKProcessRunner", package: "SKProcessRunner")
+```
+
+## Quick Start
+
+Simple async run:
+
+```swift
+import SKProcessRunner
+
+let payload = SKProcessPayload.command("ls")
+    .argument("-la")
+    .cwd(URL(fileURLWithPath: "/tmp"))
+
+let result = try await SKProcessRunner.run(payload)
+print(result.stdout)
+```
+
+Synchronous run:
+
+```swift
+let payload = SKProcessPayload.command("uname")
+    .argument("-a")
+
+let result = try SKProcessRunner.runSync(payload)
+print(result.stdout)
+```
+
+## Streaming Output
+
+You can stream output while the process runs:
+
+```swift
+let payload = SKProcessPayload.command("ping")
+    .arguments(["-c", "3", "127.0.0.1"])
+
+let result = try await SKProcessRunner.run(
+    payload,
+    onStdout: { chunk in
+        print(String(decoding: chunk, as: UTF8.self), terminator: "")
+    },
+    onStderr: { chunk in
+        print(String(decoding: chunk, as: UTF8.self), terminator: "")
+    }
+)
+print("exit:", result.exitCode)
+```
+
+## PTY Execution
+
+PTY mode merges stdout and stderr (both come through `stdoutData`).
+
+```swift
+let payload = SKProcessPayload.executableURL(URL(fileURLWithPath: "/usr/bin/env"))
+    .arguments(["bash", "-lc", "ls --color=auto"])
+    .pty(.init(rows: 30, cols: 120))
+
+let result = try await SKProcessRunner.runPTY(payload)
+print(result.stdout)
+```
+
+Synchronous PTY:
+
+```swift
+let result = try SKProcessRunner.runPTYSync(payload)
+```
+
+## SKProcessPTYSession (Interactive)
+
+`SKProcessPTYSession` gives a stream-like interface for interactive programs.
+
+```swift
+let payload = SKProcessPayload.executableURL(URL(fileURLWithPath: "/bin/sh"))
+    .arguments(["-c", "read line; echo $line"])
+    .pty(.init(rows: 24, cols: 80))
+
+let session = try SKProcessPTYSession(payload)
+
+Task {
+    for await chunk in session.output {
+        print(String(decoding: chunk, as: UTF8.self), terminator: "")
+    }
+}
+
+try await session.send(Data("hello\n".utf8))
+try await session.close()
+let result = try await session.wait()
+print("pid:", session.pid, "running:", await session.isRunning(), "exit:", result.exitCode)
+```
+
+## SKProcessPayload Builder
+
+`SKProcessPayload` is a value type with fluent builder methods:
+
+```swift
+let payload = SKProcessPayload.command("git")
+    .arguments(["status", "--porcelain"])
+    .cwd(URL(fileURLWithPath: "/path/to/repo"))
+    .environment(.current().merging(["LANG": "C"]))
+    .timeoutMs(5_000)
+    .maxOutputBytes(256 * 1024)
+    .throwOnNonZeroExit()
+```
+
+Key fields:
+- `executable`: `.path(String)` or `.url(URL)`
+- `arguments`: `[String]`
+- `stdinData`: `Data?` (set via `stdin(_:)`)
+- `cwd`: `URL?`
+- `environment`: `SKProcessEnvironment?`
+- `useUserShellEnvironment`: `Bool`
+- `timeoutMs`: `Int` (clamped to 1s...30m)
+- `maxOutputBytes`: `Int` (clamped to 8 KB...2 MB)
+- `throwOnNonZeroExit`: `Bool`
+- `pty`: `SKProcessPTYConfiguration?`
+
+## SKProcessEnvironment and PATH Resolution
+
+By default, commands resolve against the current process environment:
+
+```swift
+let payload = SKProcessPayload.command("node")
+```
+
+If you need the user shell environment (e.g., PATH updates from shell init files):
+
+```swift
+let payload = SKProcessPayload.command("node")
+    .useUserShellEnvironment(true, mode: .loginInteractive)
+```
+
+You can also load the shell environment directly:
+
+```swift
+let env = SKProcessEnvironment.userShell(mode: .loginInteractive)
+```
+
+## SKProcessResult
+
+`SKProcessResult` includes:
+- `stdoutData` / `stderrData`
+- `stdout` / `stderr` (UTF-8 best-effort)
+- `exitCode`
+- `timedOut`
+- `truncated`
+
+If output exceeds `maxOutputBytes`, `truncated` is set and data is capped.
+
+## Errors
+
+`SKProcessRunError`:
+- `executableNotFound`
+- `invalidExecutable`
+- `ptyFailed`
+- `nonZeroExit` (includes stdout/stderr data)
+- `timedOut` (includes stdout/stderr data + `truncated`)
+
+Use `.throwOnNonZeroExit()` to convert non-zero exits into errors.
+
+## Notes and Behavior
+
+- `timeoutMs` and `maxOutputBytes` are clamped to safe minimums/maximums.
+- In PTY mode, stderr is merged into stdout.
+- When `useUserShellEnvironment` is enabled, the base environment is loaded once and then merged with any payload overrides.
+- SKProcessExecutable resolution respects overrides in `payload.environment` when resolving `.path(...)`.
+
+## License
+
+See `LICENSE` if present in the repository root.
