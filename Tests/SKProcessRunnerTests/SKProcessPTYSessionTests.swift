@@ -26,8 +26,9 @@ final class SKPTestTerminalScreen {
     }
 
     func feed(_ data: Data) {
-        for byte in data {
-            process(byte)
+        let text = String(decoding: data, as: UTF8.self)
+        for scalar in text.unicodeScalars {
+            process(scalar)
         }
     }
 
@@ -35,35 +36,35 @@ final class SKPTestTerminalScreen {
         buffer.map { String($0) }.joined(separator: "\n")
     }
 
-    private func process(_ byte: UInt8) {
+    private func process(_ scalar: UnicodeScalar) {
         switch state {
         case .normal:
-            handleNormal(byte)
+            handleNormal(scalar)
         case .escape:
-            handleEscape(byte)
+            handleEscape(scalar)
         case .csi:
-            handleCsi(byte)
+            handleCsi(scalar)
         case .osc:
-            handleOsc(byte)
+            handleOsc(scalar)
         }
     }
 
-    private func handleNormal(_ byte: UInt8) {
-        switch byte {
+    private func handleNormal(_ scalar: UnicodeScalar) {
+        switch scalar.value {
         case 0x1B:
             state = .escape
         case 0x0D:
             col = 0
         case 0x0A:
             row = min(row + 1, rows - 1)
+            col = 0
         case 0x08:
             col = max(col - 1, 0)
         case 0x09:
             let nextTab = ((col / 8) + 1) * 8
             col = min(nextTab, cols - 1)
         default:
-            if byte >= 0x20 && byte != 0x7F {
-                let scalar = UnicodeScalar(byte)
+            if scalar.value >= 0x20 && scalar.value != 0x7F {
                 buffer[row][col] = Character(scalar)
                 col += 1
                 if col >= cols {
@@ -74,21 +75,21 @@ final class SKPTestTerminalScreen {
         }
     }
 
-    private func handleEscape(_ byte: UInt8) {
-        switch byte {
-        case UInt8(ascii: "["):
+    private func handleEscape(_ scalar: UnicodeScalar) {
+        switch scalar.value {
+        case 0x5B: // [
             state = .csi
             csiParams = []
             csiCurrent = ""
             csiPrivate = false
-        case UInt8(ascii: "]"):
+        case 0x5D: // ]
             state = .osc
             oscPendingEsc = false
-        case UInt8(ascii: "7"):
+        case 0x37: // 7
             savedRow = row
             savedCol = col
             state = .normal
-        case UInt8(ascii: "8"):
+        case 0x38: // 8
             row = min(max(savedRow, 0), rows - 1)
             col = min(max(savedCol, 0), cols - 1)
             state = .normal
@@ -97,34 +98,34 @@ final class SKPTestTerminalScreen {
         }
     }
 
-    private func handleOsc(_ byte: UInt8) {
+    private func handleOsc(_ scalar: UnicodeScalar) {
         if oscPendingEsc {
             oscPendingEsc = false
-            if byte == UInt8(ascii: "\\") {
+            if scalar.value == 0x5C { // \
                 state = .normal
                 return
             }
         }
-        if byte == 0x07 {
+        if scalar.value == 0x07 {
             state = .normal
             return
         }
-        if byte == 0x1B {
+        if scalar.value == 0x1B {
             oscPendingEsc = true
         }
     }
 
-    private func handleCsi(_ byte: UInt8) {
-        switch byte {
-        case UInt8(ascii: "?"), UInt8(ascii: ">"):
+    private func handleCsi(_ scalar: UnicodeScalar) {
+        switch scalar.value {
+        case 0x3F, 0x3E: // ? >
             csiPrivate = true
-        case UInt8(ascii: "0")...UInt8(ascii: "9"):
-            csiCurrent.append(Character(UnicodeScalar(byte)))
-        case UInt8(ascii: ";"):
+        case 0x30...0x39:
+            csiCurrent.append(Character(scalar))
+        case 0x3B: // ;
             finalizeCsiParam()
         default:
             finalizeCsiParam()
-            applyCsi(final: byte)
+            applyCsi(final: scalar.value)
             state = .normal
         }
     }
@@ -138,42 +139,48 @@ final class SKPTestTerminalScreen {
         }
     }
 
-    private func applyCsi(final: UInt8) {
+    private func applyCsi(final: UInt32) {
         let params = csiParams.isEmpty ? [0] : csiParams
         switch final {
-        case UInt8(ascii: "A"):
+        case 0x41: // A
             let n = params[0] == 0 ? 1 : params[0]
             row = max(row - n, 0)
-        case UInt8(ascii: "B"):
+        case 0x42: // B
             let n = params[0] == 0 ? 1 : params[0]
             row = min(row + n, rows - 1)
-        case UInt8(ascii: "C"):
+        case 0x43: // C
             let n = params[0] == 0 ? 1 : params[0]
             col = min(col + n, cols - 1)
-        case UInt8(ascii: "D"):
+        case 0x44: // D
             let n = params[0] == 0 ? 1 : params[0]
             col = max(col - n, 0)
-        case UInt8(ascii: "G"):
+        case 0x47: // G
             let n = params[0] == 0 ? 1 : params[0]
             col = min(max(n - 1, 0), cols - 1)
-        case UInt8(ascii: "H"), UInt8(ascii: "f"):
+        case 0x48, 0x66: // H f
             let r = params.count >= 1 ? params[0] : 1
             let c = params.count >= 2 ? params[1] : 1
             row = min(max(r - 1, 0), rows - 1)
             col = min(max(c - 1, 0), cols - 1)
-        case UInt8(ascii: "J"):
+        case 0x4A: // J
             let mode = params[0]
             if mode == 2 || mode == 3 {
                 clearScreen()
             }
-        case UInt8(ascii: "K"):
+        case 0x4B: // K
             let mode = params[0]
             if mode == 0 || mode == 2 {
                 clearLine()
             }
-        case UInt8(ascii: "m"):
+        case 0x6D: // m
             break
-        case UInt8(ascii: "h"), UInt8(ascii: "l"):
+        case 0x73: // s
+            savedRow = row
+            savedCol = col
+        case 0x75: // u
+            row = min(max(savedRow, 0), rows - 1)
+            col = min(max(savedCol, 0), cols - 1)
+        case 0x68, 0x6C: // h l
             if csiPrivate, params.contains(1049) {
                 clearScreen()
             }
@@ -227,7 +234,6 @@ final class SKProcessPTYSessionTests: XCTestCase {
 
         try await session.resize(rows: 40, cols: 100)
         try await session.send(Data("hello\n".utf8))
-        try await session.close()
 
         let result = try await session.wait()
         let outputData = await outputTask.value
@@ -383,14 +389,22 @@ final class SKProcessPTYSessionTests: XCTestCase {
         }
         let outputString = String(decoding: finalOutput, as: UTF8.self)
         let cleanOutput = stripANSI(outputString)
-        _ = screen.renderedText()
+        let screenText = screen.renderedText()
 
-        let sample = String(cleanOutput.prefix(2000))
-        print("Codex /model output (clean prefix):\n\(sample)")
+        let normalizedOutput = normalizeCodexOutput(cleanOutput)
+        let sample = String(normalizedOutput.prefix(2000))
+        print("Codex /model output (normalized prefix):\n\(sample)")
         let attachment = XCTAttachment(string: sample)
-        attachment.name = "Codex /model output (clean prefix)"
+        attachment.name = "Codex /model output (normalized prefix)"
         attachment.lifetime = .keepAlways
         add(attachment)
+
+        let combined = cleanOutput + "\n" + screenText
+        let hasModelListFinal = combined.contains("Select Model and Effort")
+            || combined.contains("1. gpt-")
+            || combined.contains("2. gpt-")
+
+        XCTAssertTrue(hasModelListFinal, "Expected /model list output. Output: \(normalizedOutput.prefix(2000))")
 
         let requiredModels = [
             "gpt-5.2-codex",
@@ -398,14 +412,9 @@ final class SKProcessPTYSessionTests: XCTestCase {
             "gpt-5.2",
             "gpt-5.1-codex-mini"
         ]
-        let hasModelListFinal = cleanOutput.contains("Select Model and Effort")
-            || cleanOutput.contains("1. gpt-")
-            || cleanOutput.contains("2. gpt-")
+        let missing = requiredModels.filter { !combined.contains($0) }
+        XCTAssertTrue(missing.isEmpty, "Missing models: \(missing.joined(separator: ", ")). Output: \(normalizedOutput.prefix(2000))")
 
-        XCTAssertTrue(hasModelListFinal, "Expected /model list output. Output: \(cleanOutput.split(separator: "\n").joined().split(separator: "  ").joined(separator: " ").prefix(2000))")
-
-        let missing = requiredModels.filter { !cleanOutput.contains($0) }
-        XCTAssertTrue(missing.isEmpty, "Missing models: \(missing.joined(separator: ", ")). Output: \(cleanOutput.prefix(2000))")
         XCTAssertFalse(finalOutput.isEmpty)
         _ = didTimeout
 #else
@@ -454,6 +463,28 @@ final class SKProcessPTYSessionTests: XCTestCase {
             output.unicodeScalars.append(scalar)
         }
         return output
+    }
+
+    private func normalizeCodexOutput(_ input: String) -> String {
+        var text = input
+        let markers = [
+            "Select Model and Effort",
+            "Select Reasoning Level",
+            "Press enter",
+            "Tip:"
+        ]
+        for marker in markers {
+            text = text.replacingOccurrences(of: marker, with: "\n" + marker)
+        }
+        text = replaceRegex(text, pattern: "(?<!\\n)(?<=\\s)(\\d+)\\.", replacement: "\n$1.")
+        text = replaceRegex(text, pattern: "\\.(gpt-)", replacement: ". $1")
+        return text
+    }
+
+    private func replaceRegex(_ input: String, pattern: String, replacement: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return input }
+        let range = NSRange(input.startIndex..<input.endIndex, in: input)
+        return regex.stringByReplacingMatches(in: input, range: range, withTemplate: replacement)
     }
 
     private func resolveTestCWD(env: SKProcessEnvironment) -> URL? {
