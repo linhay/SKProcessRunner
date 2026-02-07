@@ -8,6 +8,8 @@ final class SKPTestTerminalScreen {
     private var buffer: [[Character]]
     private var row: Int = 0
     private var col: Int = 0
+    private var scrollTop: Int = 0
+    private var scrollBottom: Int
     private var savedRow: Int = 0
     private var savedCol: Int = 0
     private var state: SKPTestTerminalState = .normal
@@ -19,6 +21,7 @@ final class SKPTestTerminalScreen {
     init(rows: Int, cols: Int) {
         self.rows = max(1, rows)
         self.cols = max(1, cols)
+        self.scrollBottom = self.rows - 1
         self.buffer = Array(
             repeating: Array(repeating: " ", count: self.cols),
             count: self.rows
@@ -56,7 +59,11 @@ final class SKPTestTerminalScreen {
         case 0x0D:
             col = 0
         case 0x0A:
-            row = min(row + 1, rows - 1)
+            if row == scrollBottom {
+                scrollUp(1)
+            } else {
+                row = min(row + 1, rows - 1)
+            }
             col = 0
         case 0x08:
             col = max(col - 1, 0)
@@ -164,13 +171,21 @@ final class SKPTestTerminalScreen {
             col = min(max(c - 1, 0), cols - 1)
         case 0x4A: // J
             let mode = params[0]
-            if mode == 2 || mode == 3 {
+            if mode == 0 {
+                clearFromCursor()
+            } else if mode == 1 {
+                clearToCursor()
+            } else if mode == 2 || mode == 3 {
                 clearScreen()
             }
         case 0x4B: // K
             let mode = params[0]
-            if mode == 0 || mode == 2 {
+            if mode == 0 {
                 clearLine()
+            } else if mode == 1 {
+                clearLineToCursor()
+            } else if mode == 2 {
+                clearLineAll()
             }
         case 0x6D: // m
             break
@@ -180,6 +195,34 @@ final class SKPTestTerminalScreen {
         case 0x75: // u
             row = min(max(savedRow, 0), rows - 1)
             col = min(max(savedCol, 0), cols - 1)
+        case 0x50: // P
+            let n = params[0] == 0 ? 1 : params[0]
+            deleteChars(n)
+        case 0x58: // X
+            let n = params[0] == 0 ? 1 : params[0]
+            eraseChars(n)
+        case 0x40: // @
+            let n = params[0] == 0 ? 1 : params[0]
+            insertChars(n)
+        case 0x4C: // L
+            let n = params[0] == 0 ? 1 : params[0]
+            insertLines(n)
+        case 0x4D: // M
+            let n = params[0] == 0 ? 1 : params[0]
+            deleteLines(n)
+        case 0x53: // S
+            let n = params[0] == 0 ? 1 : params[0]
+            scrollUp(n)
+        case 0x54: // T
+            let n = params[0] == 0 ? 1 : params[0]
+            scrollDown(n)
+        case 0x72: // r
+            let top = params.count >= 1 ? params[0] : 1
+            let bottom = params.count >= 2 ? params[1] : rows
+            scrollTop = min(max(top - 1, 0), rows - 1)
+            scrollBottom = min(max(bottom - 1, scrollTop), rows - 1)
+            row = scrollTop
+            col = 0
         case 0x68, 0x6C: // h l
             if csiPrivate, params.contains(1049) {
                 clearScreen()
@@ -202,6 +245,119 @@ final class SKPTestTerminalScreen {
     private func clearLine() {
         for c in col..<cols {
             buffer[row][c] = " "
+        }
+    }
+
+    private func clearLineToCursor() {
+        guard row >= 0 && row < rows else { return }
+        for c in 0...min(col, cols - 1) {
+            buffer[row][c] = " "
+        }
+    }
+
+    private func clearLineAll() {
+        guard row >= 0 && row < rows else { return }
+        for c in 0..<cols {
+            buffer[row][c] = " "
+        }
+    }
+
+    private func clearFromCursor() {
+        clearLine()
+        if row + 1 <= rows - 1 {
+            for r in (row + 1)..<rows {
+                for c in 0..<cols {
+                    buffer[r][c] = " "
+                }
+            }
+        }
+    }
+
+    private func clearToCursor() {
+        if row > 0 {
+            for r in 0..<row {
+                for c in 0..<cols {
+                    buffer[r][c] = " "
+                }
+            }
+        }
+        clearLineToCursor()
+    }
+
+    private func deleteChars(_ n: Int) {
+        guard row >= 0 && row < rows else { return }
+        let count = min(max(n, 0), cols - col)
+        if count == 0 { return }
+        for c in col..<(cols - count) {
+            buffer[row][c] = buffer[row][c + count]
+        }
+        for c in (cols - count)..<cols {
+            buffer[row][c] = " "
+        }
+    }
+
+    private func eraseChars(_ n: Int) {
+        guard row >= 0 && row < rows else { return }
+        let count = min(max(n, 0), cols - col)
+        if count == 0 { return }
+        for c in col..<(col + count) {
+            buffer[row][c] = " "
+        }
+    }
+
+    private func insertChars(_ n: Int) {
+        guard row >= 0 && row < rows else { return }
+        let count = min(max(n, 0), cols - col)
+        if count == 0 { return }
+        for c in stride(from: cols - 1, through: col + count, by: -1) {
+            buffer[row][c] = buffer[row][c - count]
+        }
+        for c in col..<(col + count) {
+            buffer[row][c] = " "
+        }
+    }
+
+    private func insertLines(_ n: Int) {
+        let count = min(max(n, 0), scrollBottom - row + 1)
+        if count == 0 { return }
+        for r in stride(from: scrollBottom, through: row + count, by: -1) {
+            buffer[r] = buffer[r - count]
+        }
+        for r in row..<(row + count) {
+            buffer[r] = Array(repeating: " ", count: cols)
+        }
+    }
+
+    private func deleteLines(_ n: Int) {
+        let count = min(max(n, 0), scrollBottom - row + 1)
+        if count == 0 { return }
+        for r in row...(scrollBottom - count) {
+            buffer[r] = buffer[r + count]
+        }
+        for r in (scrollBottom - count + 1)...scrollBottom {
+            buffer[r] = Array(repeating: " ", count: cols)
+        }
+    }
+
+    private func scrollUp(_ n: Int) {
+        let count = min(max(n, 0), scrollBottom - scrollTop + 1)
+        if count == 0 { return }
+        for r in scrollTop...(scrollBottom - count) {
+            buffer[r] = buffer[r + count]
+        }
+        for r in (scrollBottom - count + 1)...scrollBottom {
+            buffer[r] = Array(repeating: " ", count: cols)
+        }
+    }
+
+    private func scrollDown(_ n: Int) {
+        let count = min(max(n, 0), scrollBottom - scrollTop + 1)
+        if count == 0 { return }
+        for r in stride(from: scrollBottom, through: scrollTop + count, by: -1) {
+            buffer[r] = buffer[r - count]
+        }
+        for r in scrollTop..<(scrollTop + count) {
+            buffer[r] = Array(repeating: " ", count: cols)
         }
     }
 }
@@ -391,11 +547,10 @@ final class SKProcessPTYSessionTests: XCTestCase {
         let cleanOutput = stripANSI(outputString)
         let screenText = screen.renderedText()
 
-        let normalizedOutput = normalizeCodexOutput(cleanOutput)
-        let sample = String(normalizedOutput.prefix(2000))
-        print("Codex /model output (normalized prefix):\n\(sample)")
+        let sample = String(screenText.prefix(2000))
+        print("Codex /model output (screen prefix):\n\(sample)")
         let attachment = XCTAttachment(string: sample)
-        attachment.name = "Codex /model output (normalized prefix)"
+        attachment.name = "Codex /model output (screen prefix)"
         attachment.lifetime = .keepAlways
         add(attachment)
 
@@ -404,6 +559,7 @@ final class SKProcessPTYSessionTests: XCTestCase {
             || combined.contains("1. gpt-")
             || combined.contains("2. gpt-")
 
+        let normalizedOutput = normalizeCodexOutput(cleanOutput)
         XCTAssertTrue(hasModelListFinal, "Expected /model list output. Output: \(normalizedOutput.prefix(2000))")
 
         let requiredModels = [
