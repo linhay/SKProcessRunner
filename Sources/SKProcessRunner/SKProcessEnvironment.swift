@@ -31,7 +31,7 @@ public struct SKProcessEnvironment: Sendable, Equatable {
         return SKProcessEnvironment(merged)
     }
 
-    public func merged(with other: SKProcessEnvironment) -> SKProcessEnvironment {
+    public func merging(_ other: SKProcessEnvironment) -> SKProcessEnvironment {
         merging(other.values)
     }
 }

@@ -246,26 +246,28 @@ final class SKProcessPTYSessionTests: XCTestCase {
 
     func testPTYSessionCodex() async throws {
 #if os(macOS)
-        let whichPayload = SKProcessPayload.executableURL(URL(fileURLWithPath: "/usr/bin/which"))
-            .arguments(["codex"])
-            .timeoutMs(1_000)
-            .maxOutputBytes(8 * 1024)
-        do {
-            _ = try SKProcessRunner.runSync(whichPayload)
-        } catch {
-            throw XCTSkip("Codex CLI not found in PATH.")
+        guard let codexURL = SKProcessRunner.resolveExecutableInUserShellSync(named: "codex") else {
+            throw XCTSkip("Codex CLI not found in user shell PATH.")
         }
 
-        let env = SKProcessEnvironment.current()
-            .merging(["TERM": "xterm-256color", "COLORTERM": "truecolor"])
-        let payload = SKProcessPayload.executableURL(URL(fileURLWithPath: "/usr/bin/env"))
+        let env = SKProcessEnvironment
+            .current()
+            .merging(.userShell())
+            .merging([
+                "TERM": "xterm-256color",
+                "COLORTERM": "truecolor",
+                "LANG": "en_US.UTF-8",
+                "LC_ALL": "en_US.UTF-8"
+            ])
+        let cwd = resolveTestCWD(env: env)
+        let payload = SKProcessPayload.executableURL(codexURL)
             .arguments([
-                "codex",
                 "-c", "model=\"\"",
                 "-c", "model_reasoning_effort=medium",
                 "-c", "mcp_servers.figma.enabled=false",
                 "-c", "mcp_servers.uiagent.enabled=false"
             ])
+            .cwd(cwd)
             .environment(env)
             .timeoutMs(30_000)
             .maxOutputBytes(256 * 1024)
@@ -381,13 +383,12 @@ final class SKProcessPTYSessionTests: XCTestCase {
         }
         let outputString = String(decoding: finalOutput, as: UTF8.self)
         let cleanOutput = stripANSI(outputString)
-        let screenText = screen.renderedText()
-        let combinedText = "\(cleanOutput)\n\(screenText)"
+        _ = screen.renderedText()
 
-        let sample = String(combinedText.prefix(2000))
-        print("Codex /model output (combined prefix):\n\(sample)")
+        let sample = String(cleanOutput.prefix(2000))
+        print("Codex /model output (clean prefix):\n\(sample)")
         let attachment = XCTAttachment(string: sample)
-        attachment.name = "Codex /model output (combined prefix)"
+        attachment.name = "Codex /model output (clean prefix)"
         attachment.lifetime = .keepAlways
         add(attachment)
 
@@ -397,14 +398,14 @@ final class SKProcessPTYSessionTests: XCTestCase {
             "gpt-5.2",
             "gpt-5.1-codex-mini"
         ]
-        let hasModelListFinal = combinedText.contains("Select Model and Effort")
-            || combinedText.contains("1. gpt-")
-            || combinedText.contains("2. gpt-")
+        let hasModelListFinal = cleanOutput.contains("Select Model and Effort")
+            || cleanOutput.contains("1. gpt-")
+            || cleanOutput.contains("2. gpt-")
 
-        XCTAssertTrue(hasModelListFinal, "Expected /model list output. Output: \(combinedText.prefix(2000))")
+        XCTAssertTrue(hasModelListFinal, "Expected /model list output. Output: \(cleanOutput.split(separator: "\n").joined().split(separator: "  ").joined(separator: " ").prefix(2000))")
 
-        let missing = requiredModels.filter { !combinedText.contains($0) }
-        XCTAssertTrue(missing.isEmpty, "Missing models: \(missing.joined(separator: ", ")). Output: \(combinedText.prefix(2000))")
+        let missing = requiredModels.filter { !cleanOutput.contains($0) }
+        XCTAssertTrue(missing.isEmpty, "Missing models: \(missing.joined(separator: ", ")). Output: \(cleanOutput.prefix(2000))")
         XCTAssertFalse(finalOutput.isEmpty)
         _ = didTimeout
 #else
@@ -453,5 +454,23 @@ final class SKProcessPTYSessionTests: XCTestCase {
             output.unicodeScalars.append(scalar)
         }
         return output
+    }
+
+    private func resolveTestCWD(env: SKProcessEnvironment) -> URL? {
+        let values = env.values
+        if let srcRoot = values["SRCROOT"], !srcRoot.isEmpty {
+            return URL(fileURLWithPath: srcRoot)
+        }
+        if let projectDir = values["PROJECT_DIR"], !projectDir.isEmpty {
+            return URL(fileURLWithPath: projectDir)
+        }
+        if let pwd = values["PWD"], !pwd.isEmpty {
+            return URL(fileURLWithPath: pwd)
+        }
+        let current = FileManager.default.currentDirectoryPath
+        if !current.isEmpty {
+            return URL(fileURLWithPath: current)
+        }
+        return nil
     }
 }
