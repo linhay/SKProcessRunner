@@ -1,6 +1,11 @@
 import Foundation
 import XCTest
 @testable import SKProcessRunner
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 
 #if os(macOS)
 final class SKProcessRunnerPublicAPITests: XCTestCase {
@@ -188,6 +193,60 @@ final class SKProcessRunnerPublicAPITests: XCTestCase {
         }
     }
 
+    func testRunSyncTimeoutTerminatesChildProcessTree() throws {
+        try withSKProcessTempDir("timeout-tree-sync") { temp in
+            let pidFile = temp.url.appendingPathComponent("child.pid")
+            let command = "sh -c 'trap \"\" TERM; sleep 30' & child=$!; echo $child > '\(pidFile.path)'; wait $child"
+
+            let payload = SKProcessPayload.command("/bin/sh")
+                .arguments(["-c", command])
+                .timeoutMs(1_000)
+
+            let startedAt = Date()
+            do {
+                _ = try SKProcessRunner.runSync(payload)
+                XCTFail("Expected timedOut error")
+            } catch SKProcessRunError.timedOut {
+                // expected
+            }
+            let elapsed = Date().timeIntervalSince(startedAt)
+            XCTAssertLessThan(elapsed, 5, "Timeout path should return quickly without waiting for orphan descendants")
+
+            let childPID = try waitAndReadPID(from: pidFile)
+            defer { _ = kill(childPID, SIGKILL) }
+
+            usleep(300_000)
+            XCTAssertFalse(isProcessAlive(childPID), "Expected child process to be terminated after timeout")
+        }
+    }
+
+    func testRunAsyncTimeoutTerminatesChildProcessTree() async throws {
+        try await withSKProcessTempDir("timeout-tree-async") { temp in
+            let pidFile = temp.url.appendingPathComponent("child.pid")
+            let command = "sh -c 'trap \"\" TERM; sleep 30' & child=$!; echo $child > '\(pidFile.path)'; wait $child"
+
+            let payload = SKProcessPayload.command("/bin/sh")
+                .arguments(["-c", command])
+                .timeoutMs(1_000)
+
+            let startedAt = Date()
+            do {
+                _ = try await SKProcessRunner.run(payload)
+                XCTFail("Expected timedOut error")
+            } catch SKProcessRunError.timedOut {
+                // expected
+            }
+            let elapsed = Date().timeIntervalSince(startedAt)
+            XCTAssertLessThan(elapsed, 5, "Async timeout path should return quickly without waiting for orphan descendants")
+
+            let childPID = try waitAndReadPID(from: pidFile)
+            defer { _ = kill(childPID, SIGKILL) }
+
+            usleep(300_000)
+            XCTAssertFalse(isProcessAlive(childPID), "Expected child process to be terminated after async timeout")
+        }
+    }
+
     func testRunAsyncOutputTruncation() async throws {
         let payload = SKProcessPayload.command("/bin/sh")
             .arguments(["-c", "yes a | head -c 10000"])
@@ -206,6 +265,45 @@ final class SKProcessRunnerPublicAPITests: XCTestCase {
         let result = try SKProcessRunner.runSync(payload)
         XCTAssertTrue(result.truncated)
         XCTAssertEqual(result.stdoutData.count, 8 * 1024)
+    }
+
+    func testRunSyncOutputSpoolReturnsPathWhenTruncated() throws {
+        let payload = SKProcessPayload.command("/bin/sh")
+            .arguments(["-c", "yes a | head -c 10000"])
+            .maxOutputBytes(8 * 1024)
+            .spoolFullOutput()
+
+        let result = try SKProcessRunner.runSync(payload)
+        XCTAssertTrue(result.truncated)
+        XCTAssertNotNil(result.fullOutputPath)
+
+        guard let fullOutputPath = result.fullOutputPath else { return XCTFail("Expected full output path") }
+        defer { try? FileManager.default.removeItem(atPath: fullOutputPath) }
+
+        let fullData = try Data(contentsOf: URL(fileURLWithPath: fullOutputPath))
+        XCTAssertGreaterThan(fullData.count, result.stdoutData.count)
+    }
+
+    func testRunSyncOutputSpoolDoesNotReturnPathWhenNotTruncated() throws {
+        let payload = SKProcessPayload.command("/bin/sh")
+            .arguments(["-c", "echo hello"])
+            .maxOutputBytes(8 * 1024)
+            .spoolFullOutput()
+
+        let result = try SKProcessRunner.runSync(payload)
+        XCTAssertFalse(result.truncated)
+        XCTAssertNil(result.fullOutputPath)
+    }
+
+    func testRunSyncOutputSpoolWriteFailureFallsBackGracefully() throws {
+        let payload = SKProcessPayload.command("/bin/sh")
+            .arguments(["-c", "yes a | head -c 10000"])
+            .maxOutputBytes(8 * 1024)
+            .spoolFullOutput(directory: URL(fileURLWithPath: "/dev/null"))
+
+        let result = try SKProcessRunner.runSync(payload)
+        XCTAssertTrue(result.truncated)
+        XCTAssertNil(result.fullOutputPath)
     }
 
     func testRunPTYAsyncMergesOutput() async throws {
@@ -305,6 +403,7 @@ final class SKProcessRunnerPublicAPITests: XCTestCase {
             .useUserShellEnvironment(true)
             .timeoutMs(2_500)
             .maxOutputBytes(128 * 1024)
+            .terminationGracePeriodMs(750)
             .throwOnNonZeroExit()
             .pty(.init(rows: 10, cols: 20))
 
@@ -314,6 +413,7 @@ final class SKProcessRunnerPublicAPITests: XCTestCase {
         XCTAssertTrue(payload.useUserShellEnvironment)
         XCTAssertEqual(payload.timeoutMs, 2_500)
         XCTAssertEqual(payload.maxOutputBytes, 128 * 1024)
+        XCTAssertEqual(payload.terminationGracePeriodMs, 750)
         XCTAssertTrue(payload.throwOnNonZeroExit)
         XCTAssertEqual(payload.pty?.rows, 10)
         XCTAssertEqual(payload.pty?.cols, 20)
@@ -331,6 +431,25 @@ final class SKProcessRunnerPublicAPITests: XCTestCase {
         XCTAssertEqual(result.stdout, "out")
         XCTAssertEqual(result.stderr, "err")
         XCTAssertEqual(result.exitCode, 1)
+    }
+
+    private func waitAndReadPID(from fileURL: URL, timeoutMs: Int = 1_500) throws -> pid_t {
+        let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
+        while Date() < deadline {
+            if let text = try? String(contentsOf: fileURL, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+               let pid = Int32(text),
+               pid > 0 {
+                return pid
+            }
+            usleep(20_000)
+        }
+        throw XCTSkip("PID file was not produced in time: \(fileURL.path)")
+    }
+
+    private func isProcessAlive(_ pid: pid_t) -> Bool {
+        guard pid > 0 else { return false }
+        if kill(pid, 0) == 0 { return true }
+        return errno == EPERM
     }
 }
 #else

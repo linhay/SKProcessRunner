@@ -132,7 +132,9 @@ let payload = SKProcessPayload.command("git")
     .cwd(URL(fileURLWithPath: "/path/to/repo"))
     .environment(.current().merging(["LANG": "C"]))
     .timeoutMs(5_000)
+    .terminationGracePeriodMs(300)
     .maxOutputBytes(256 * 1024)
+    .spoolFullOutput()
     .throwOnNonZeroExit()
 ```
 
@@ -144,7 +146,10 @@ Key fields:
 - `environment`: `SKProcessEnvironment?`
 - `useUserShellEnvironment`: `Bool`
 - `timeoutMs`: `Int` (clamped to 1s...30m)
+- `terminationGracePeriodMs`: `Int` (clamped to 0...10s)
 - `maxOutputBytes`: `Int` (clamped to 8 KB...2 MB)
+- `spoolFullOutput`: `Bool` (optional full-log spooling)
+- `fullOutputDirectory`: `URL?` (defaults to system temp directory)
 - `throwOnNonZeroExit`: `Bool`
 - `pty`: `SKProcessPTYConfiguration?`
 
@@ -177,8 +182,11 @@ let env = SKProcessEnvironment.userShell(mode: .loginInteractive)
 - `exitCode`
 - `timedOut`
 - `truncated`
+- `fullOutputPath` (`String?`)
 
 If output exceeds `maxOutputBytes`, `truncated` is set and data is capped.
+If `.spoolFullOutput()` is enabled and truncation occurs, `fullOutputPath` points to a temp file containing full merged process output.
+If truncation does not occur, temp file is cleaned up and `fullOutputPath` is `nil`.
 
 ## Errors
 
@@ -194,6 +202,7 @@ Use `.throwOnNonZeroExit()` to convert non-zero exits into errors.
 ## Notes and Behavior
 
 - `timeoutMs` and `maxOutputBytes` are clamped to safe minimums/maximums.
+- On timeout (non-PTY), the runner uses process-tree escalation: `SIGTERM` then `SIGKILL` after `terminationGracePeriodMs`.
 - In PTY mode, stderr is merged into stdout.
 - When `useUserShellEnvironment` is enabled, the base environment is loaded once and then merged with any payload overrides.
 - SKProcessExecutable resolution respects overrides in `payload.environment` when resolving `.path(...)`.

@@ -17,6 +17,9 @@ public struct SKProcessPayload: Sendable, Equatable {
     public var userShellTimeoutMs: Int
     public var timeoutMs: Int
     public var maxOutputBytes: Int
+    public var terminationGracePeriodMs: Int
+    public var spoolFullOutput: Bool
+    public var fullOutputDirectory: URL?
     public var throwOnNonZeroExit: Bool
     public var pty: SKProcessPTYConfiguration?
 
@@ -32,6 +35,9 @@ public struct SKProcessPayload: Sendable, Equatable {
         userShellTimeoutMs: Int = 2_000,
         timeoutMs: Int = 12_000,
         maxOutputBytes: Int = 64 * 1024,
+        terminationGracePeriodMs: Int = 300,
+        spoolFullOutput: Bool = false,
+        fullOutputDirectory: URL? = nil,
         throwOnNonZeroExit: Bool = false,
         pty: SKProcessPTYConfiguration? = nil
     ) {
@@ -46,6 +52,9 @@ public struct SKProcessPayload: Sendable, Equatable {
         self.userShellTimeoutMs = userShellTimeoutMs
         self.timeoutMs = timeoutMs
         self.maxOutputBytes = maxOutputBytes
+        self.terminationGracePeriodMs = terminationGracePeriodMs
+        self.spoolFullOutput = spoolFullOutput
+        self.fullOutputDirectory = fullOutputDirectory
         self.throwOnNonZeroExit = throwOnNonZeroExit
         self.pty = pty
     }
@@ -117,6 +126,19 @@ public extension SKProcessPayload {
     func maxOutputBytes(_ value: Int) -> Self {
         var copy = self
         copy.maxOutputBytes = value
+        return copy
+    }
+
+    func terminationGracePeriodMs(_ value: Int) -> Self {
+        var copy = self
+        copy.terminationGracePeriodMs = value
+        return copy
+    }
+
+    func spoolFullOutput(_ enabled: Bool = true, directory: URL? = nil) -> Self {
+        var copy = self
+        copy.spoolFullOutput = enabled
+        copy.fullOutputDirectory = directory
         return copy
     }
 

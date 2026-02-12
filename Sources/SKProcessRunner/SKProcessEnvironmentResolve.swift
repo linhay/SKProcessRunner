@@ -31,7 +31,10 @@ enum SKProcessEnvironmentResolver {
             cwd: configuration.cwd,
             environment: merged,
             timeoutMs: configuration.timeoutMs,
-            maxOutputBytes: configuration.maxOutputBytes
+            maxOutputBytes: configuration.maxOutputBytes,
+            terminationGracePeriodMs: configuration.terminationGracePeriodMs,
+            spoolFullOutput: configuration.spoolFullOutput,
+            fullOutputDirectory: configuration.fullOutputDirectory
         )
     }
 
@@ -61,7 +64,10 @@ enum SKProcessEnvironmentResolver {
             cwd: payload.cwd,
             environment: payload.environment?.values ?? [:],
             timeoutMs: payload.timeoutMs,
-            maxOutputBytes: payload.maxOutputBytes
+            maxOutputBytes: payload.maxOutputBytes,
+            terminationGracePeriodMs: payload.terminationGracePeriodMs,
+            spoolFullOutput: payload.spoolFullOutput,
+            fullOutputDirectory: payload.fullOutputDirectory
         )
 
         let merged = mergeConfiguration(configuration, baseEnvironment: baseEnv)

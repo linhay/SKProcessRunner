@@ -46,7 +46,11 @@ public actor SKProcessPTYSession {
         self.timeoutMs = timeoutMs
         self.maxOutputBytes = maxOutputBytes
 
-        self.state = SKProcessRunnerState(maxOutputBytes: maxOutputBytes)
+        self.state = SKProcessRunnerState(
+            maxOutputBytes: maxOutputBytes,
+            spoolFullOutput: configuration.spoolFullOutput,
+            fullOutputDirectory: configuration.fullOutputDirectory
+        )
         self.masterHandle = FileHandle(fileDescriptor: masterFD, closeOnDealloc: true)
 
         var continuationRef: AsyncStream<Data>.Continuation?
@@ -166,7 +170,8 @@ public actor SKProcessPTYSession {
             stderrData: Data(),
             exitCode: code,
             timedOut: false,
-            truncated: state.truncated
+            truncated: state.truncated,
+            fullOutputPath: state.fullOutputPath
         )
 
         if throwOnNonZeroExit, code != 0 {

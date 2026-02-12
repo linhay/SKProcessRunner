@@ -33,6 +33,7 @@ public extension SKProcessRunner {
     ) async throws -> SKProcessResult {
         let timeoutMs = max(1_000, min(configuration.timeoutMs, 30 * 60 * 1000))
         let maxOutputBytes = max(8 * 1024, min(configuration.maxOutputBytes, 2 * 1024 * 1024))
+        let terminationGracePeriodMs = max(0, min(configuration.terminationGracePeriodMs, 10_000))
 
         let process = Process()
         process.executableURL = executableURL
@@ -73,7 +74,11 @@ public extension SKProcessRunner {
         }
 
         return try await withCheckedThrowingContinuation { continuation in
-            let state = SKProcessRunnerState(maxOutputBytes: maxOutputBytes)
+            let state = SKProcessRunnerState(
+                maxOutputBytes: maxOutputBytes,
+                spoolFullOutput: configuration.spoolFullOutput,
+                fullOutputDirectory: configuration.fullOutputDirectory
+            )
 
             stdoutPipe.fileHandleForReading.readabilityHandler = { fh in
                 let chunk = fh.availableData
@@ -91,7 +96,10 @@ public extension SKProcessRunner {
             timer.setEventHandler {
                 guard state.finishIfNeeded() else { return }
 
-                process.terminate()
+                SKProcessTreeTerminator.terminateProcessTree(
+                    rootPID: process.processIdentifier,
+                    gracePeriodMs: terminationGracePeriodMs
+                )
                 stdoutPipe.fileHandleForReading.readabilityHandler = nil
                 stderrPipe.fileHandleForReading.readabilityHandler = nil
                 state.appendStdout(stdoutPipe.fileHandleForReading.readDataToEndOfFile())
@@ -122,7 +130,8 @@ public extension SKProcessRunner {
                     stderrData: state.stderrData,
                     exitCode: code,
                     timedOut: false,
-                    truncated: state.truncated
+                    truncated: state.truncated,
+                    fullOutputPath: state.fullOutputPath
                 )
 
                 if throwOnNonZeroExit, code != 0 {

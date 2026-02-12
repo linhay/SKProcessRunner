@@ -81,7 +81,11 @@ public extension SKProcessRunner {
         }
 
         return try await withCheckedThrowingContinuation { continuation in
-            let state = SKProcessRunnerState(maxOutputBytes: maxOutputBytes)
+            let state = SKProcessRunnerState(
+                maxOutputBytes: maxOutputBytes,
+                spoolFullOutput: configuration.spoolFullOutput,
+                fullOutputDirectory: configuration.fullOutputDirectory
+            )
             let masterHandle = FileHandle(fileDescriptor: masterFD, closeOnDealloc: true)
 
             let readSource = DispatchSource.makeReadSource(fileDescriptor: masterFD, queue: .global(qos: .utility))
@@ -130,7 +134,8 @@ public extension SKProcessRunner {
                     stderrData: Data(),
                     exitCode: code,
                     timedOut: false,
-                    truncated: state.truncated
+                    truncated: state.truncated,
+                    fullOutputPath: state.fullOutputPath
                 )
 
                 if throwOnNonZeroExit, code != 0 {
@@ -174,7 +179,11 @@ public extension SKProcessRunner {
             }
         }
 
-        let state = SKProcessRunnerState(maxOutputBytes: maxOutputBytes)
+        let state = SKProcessRunnerState(
+            maxOutputBytes: maxOutputBytes,
+            spoolFullOutput: configuration.spoolFullOutput,
+            fullOutputDirectory: configuration.fullOutputDirectory
+        )
         let masterHandle = FileHandle(fileDescriptor: masterFD, closeOnDealloc: true)
 
         let readSource = DispatchSource.makeReadSource(fileDescriptor: masterFD, queue: .global(qos: .utility))
@@ -228,7 +237,8 @@ public extension SKProcessRunner {
                 stderrData: Data(),
                 exitCode: code,
                 timedOut: false,
-                truncated: state.truncated
+                truncated: state.truncated,
+                fullOutputPath: state.fullOutputPath
             )
 
             if throwOnNonZeroExit, code != 0 {
