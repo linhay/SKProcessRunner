@@ -14,6 +14,9 @@ public actor SKProcessPipeSession {
     private let stdoutReadHandle: FileHandle
     private let stderrReadHandle: FileHandle
     private let stdinWriteHandle: FileHandle
+    private let stdoutReadSource: DispatchSourceRead
+    private let stderrReadSource: DispatchSourceRead
+    private let timer: DispatchSourceTimer
     private var stdoutContinuation: AsyncStream<Data>.Continuation?
     private var stderrContinuation: AsyncStream<Data>.Continuation?
     private var waiters: [CheckedContinuation<SKProcessResult, Error>] = []
@@ -70,18 +73,25 @@ public actor SKProcessPipeSession {
         }
         self.stderrContinuation = stderrCont
 
-        stdoutReadHandle.readabilityHandler = { [stdoutReadHandle] _ in
+        let stdoutFD = stdoutReadHandle.fileDescriptor
+        let stderrFD = stderrReadHandle.fileDescriptor
+        self.stdoutReadSource = DispatchSource.makeReadSource(fileDescriptor: stdoutFD, queue: .global(qos: .utility))
+        self.stderrReadSource = DispatchSource.makeReadSource(fileDescriptor: stderrFD, queue: .global(qos: .utility))
+        self.timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+
+        stdoutReadSource.setEventHandler { [stdoutReadHandle] in
             let data = stdoutReadHandle.availableData
             guard !data.isEmpty else { return }
             Task { await self.handleStdoutRead(data) }
         }
-        stderrReadHandle.readabilityHandler = { [stderrReadHandle] _ in
+        stderrReadSource.setEventHandler { [stderrReadHandle] in
             let data = stderrReadHandle.availableData
             guard !data.isEmpty else { return }
             Task { await self.handleStderrRead(data) }
         }
+        stdoutReadSource.resume()
+        stderrReadSource.resume()
 
-        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
         timer.schedule(deadline: .now() + .milliseconds(timeoutMs))
         timer.setEventHandler {
             Task { await self.handleTimeout() }
@@ -89,7 +99,7 @@ public actor SKProcessPipeSession {
         timer.resume()
 
         process.terminationHandler = { _ in
-            timer.cancel()
+            self.timer.cancel()
             Task { await self.handleExit() }
         }
     }
@@ -136,12 +146,14 @@ public actor SKProcessPipeSession {
     }
 
     private func handleStdoutRead(_ data: Data) {
+        guard !isFinished else { return }
         guard !data.isEmpty else { return }
         state.appendStdout(data)
         stdoutContinuation?.yield(data)
     }
 
     private func handleStderrRead(_ data: Data) {
+        guard !isFinished else { return }
         guard !data.isEmpty else { return }
         state.appendStderr(data)
         stderrContinuation?.yield(data)
@@ -199,8 +211,8 @@ public actor SKProcessPipeSession {
     }
 
     private func finishIO() {
-        stdoutReadHandle.readabilityHandler = nil
-        stderrReadHandle.readabilityHandler = nil
+        stdoutReadSource.cancel()
+        stderrReadSource.cancel()
         state.appendStdout(stdoutReadHandle.readDataToEndOfFile())
         state.appendStderr(stderrReadHandle.readDataToEndOfFile())
 
@@ -209,4 +221,3 @@ public actor SKProcessPipeSession {
         try? stdinWriteHandle.close()
     }
 }
-

@@ -96,6 +96,27 @@ final class SKProcessPipeSessionTests: XCTestCase {
             XCTAssertTrue(String(decoding: stderrData, as: UTF8.self).contains("boom"))
         }
     }
+
+    func testPipeSessionLifecycleStressDoesNotCrash() async throws {
+        for i in 0..<100 {
+            let payload = SKProcessPayload.command("/bin/sh")
+                .arguments(["-c", "echo run-\(i); sleep 0.01"])
+                .timeoutMs(3_000)
+
+            let session = try SKProcessPipeSession(payload)
+            let outputTask = Task { () -> String in
+                let stream = await session.stdout
+                var data = Data()
+                for await chunk in stream { data.append(chunk) }
+                return String(decoding: data, as: UTF8.self)
+            }
+
+            let result = try await session.wait()
+            let output = await outputTask.value
+            XCTAssertEqual(result.exitCode, 0)
+            XCTAssertTrue(output.contains("run-\(i)"))
+        }
+    }
 }
 #else
 final class SKProcessPipeSessionTests: XCTestCase {
@@ -104,4 +125,3 @@ final class SKProcessPipeSessionTests: XCTestCase {
     }
 }
 #endif
-
