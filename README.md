@@ -122,6 +122,30 @@ let result = try await session.wait()
 print("pid:", session.pid, "running:", await session.isRunning(), "exit:", result.exitCode)
 ```
 
+## SKProcessPipeSession (Non-PTY Interactive)
+
+`SKProcessPipeSession` provides long-lived bidirectional stdio communication without PTY semantics.
+
+```swift
+let payload = SKProcessPayload.command("/bin/sh")
+    .arguments(["-c", "while IFS= read -r line; do printf '%s\\n' \"$line\"; done"])
+    .timeoutMs(10_000)
+
+let session = try SKProcessPipeSession(payload)
+
+Task {
+    let stream = await session.stdout
+    for await chunk in stream {
+        print("stdout:", String(decoding: chunk, as: UTF8.self), terminator: "")
+    }
+}
+
+try await session.send(Data("{\"op\":\"ping\"}\n".utf8))
+try await session.closeStdin()
+let result = try await session.wait()
+print("pid:", session.pid, "exit:", result.exitCode)
+```
+
 ## SKProcessPayload Builder
 
 `SKProcessPayload` is a value type with fluent builder methods:

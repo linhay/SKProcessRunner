@@ -4,6 +4,7 @@ public enum SKProcessRunError: Error, Sendable, Equatable, LocalizedError {
     case executableNotFound(String)
     case invalidExecutable(String)
     case ptyFailed(String)
+    case pipeFailed(String)
     case nonZeroExit(exitCode: Int, stdoutData: Data, stderrData: Data)
     case timedOut(timeoutMs: Int, stdoutData: Data, stderrData: Data, truncated: Bool)
 
@@ -15,6 +16,8 @@ public enum SKProcessRunError: Error, Sendable, Equatable, LocalizedError {
             return "Invalid executable: \(value)"
         case .ptyFailed(let message):
             return "PTY setup failed: \(message)"
+        case .pipeFailed(let message):
+            return "Pipe session failed: \(message)"
         case .nonZeroExit(let code, let stdoutData, let stderrData):
             let out = String(data: stdoutData, encoding: .utf8) ?? ""
             let err = String(data: stderrData, encoding: .utf8) ?? ""
