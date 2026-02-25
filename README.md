@@ -44,6 +44,20 @@ Then add the product to your target:
 .product(name: "SKProcessRunner", package: "SKProcessRunner")
 ```
 
+## iOS Build Verification
+
+Use the helper script to validate iOS simulator compilation with explicit SDK:
+
+```bash
+./scripts/check-ios-sim-build.sh
+```
+
+Optional triple override:
+
+```bash
+IOS_TRIPLE=arm64-apple-ios16.0-simulator ./scripts/check-ios-sim-build.sh
+```
+
 ## Quick Start
 
 Simple async run:
