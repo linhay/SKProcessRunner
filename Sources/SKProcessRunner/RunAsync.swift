@@ -1,5 +1,6 @@
 import Foundation
 
+#if os(macOS)
 public extension SKProcessRunner {
     static func run(_ payload: SKProcessPayload) async throws -> SKProcessResult {
         try await run(payload, onStdout: nil, onStderr: nil)
@@ -147,3 +148,18 @@ public extension SKProcessRunner {
         }
     }
 }
+#else
+public extension SKProcessRunner {
+    static func run(_ payload: SKProcessPayload) async throws -> SKProcessResult {
+        throw SKProcessRunError.unsupportedPlatform("run is only available on macOS.")
+    }
+
+    static func run(
+        _ payload: SKProcessPayload,
+        onStdout: (@Sendable (Data) -> Void)?,
+        onStderr: (@Sendable (Data) -> Void)?
+    ) async throws -> SKProcessResult {
+        throw SKProcessRunError.unsupportedPlatform("run is only available on macOS.")
+    }
+}
+#endif

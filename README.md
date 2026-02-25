@@ -25,7 +25,7 @@ PTY support is implemented for Darwin and Glibc. `SKProcessPTYSession` is only c
 
 | API | macOS | iOS |
 |---|---|---|
-| `run` / `runSync` | Supported | Supported |
+| `run` / `runSync` | Supported | Not supported (throws `unsupportedPlatform`) |
 | `runPTY` / `runPTYSync` | Supported | Supported (platform capability may vary) |
 | `SKProcessPTYSession` | Supported | Not supported |
 | `SKProcessPipeSession` | Supported | Not supported (compile-time unavailable) |
@@ -227,6 +227,7 @@ If truncation does not occur, temp file is cleaned up and `fullOutputPath` is `n
 `SKProcessRunError`:
 - `executableNotFound`
 - `invalidExecutable`
+- `unsupportedPlatform`
 - `ptyFailed`
 - `pipeFailed`
 - `nonZeroExit` (includes stdout/stderr data)

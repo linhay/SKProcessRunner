@@ -5,6 +5,7 @@ import Darwin
 import Glibc
 #endif
 
+#if os(macOS)
 enum SKProcessTreeTerminator {
     static func terminateProcessTree(rootPID: Int32, gracePeriodMs: Int) {
         guard rootPID > 0 else { return }
@@ -89,3 +90,29 @@ enum SKProcessTreeTerminator {
         return errno == EPERM
     }
 }
+#else
+enum SKProcessTreeTerminator {
+    static func terminateProcessTree(rootPID: Int32, gracePeriodMs: Int) {
+        guard rootPID > 0 else { return }
+        _ = kill(rootPID, SIGTERM)
+        waitForExit(pid: rootPID, timeoutMs: max(0, gracePeriodMs))
+        if isAlive(rootPID) {
+            _ = kill(rootPID, SIGKILL)
+        }
+    }
+
+    private static func waitForExit(pid: Int32, timeoutMs: Int) {
+        guard timeoutMs > 0 else { return }
+        let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
+        while Date() < deadline {
+            if !isAlive(pid) { return }
+            usleep(20_000)
+        }
+    }
+
+    private static func isAlive(_ pid: Int32) -> Bool {
+        if kill(pid, 0) == 0 { return true }
+        return errno == EPERM
+    }
+}
+#endif

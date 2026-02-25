@@ -1,5 +1,6 @@
 import Foundation
 
+#if os(macOS)
 public extension SKProcessRunner {
     static func runSync(_ payload: SKProcessPayload) throws -> SKProcessResult {
         try runSync(payload, onStdout: nil, onStderr: nil)
@@ -143,3 +144,18 @@ public extension SKProcessRunner {
         return finishedResult ?? .init(stdoutData: Data(), stderrData: Data(), exitCode: -1, timedOut: false, truncated: false)
     }
 }
+#else
+public extension SKProcessRunner {
+    static func runSync(_ payload: SKProcessPayload) throws -> SKProcessResult {
+        throw SKProcessRunError.unsupportedPlatform("runSync is only available on macOS.")
+    }
+
+    static func runSync(
+        _ payload: SKProcessPayload,
+        onStdout: ((Data) -> Void)?,
+        onStderr: ((Data) -> Void)?
+    ) throws -> SKProcessResult {
+        throw SKProcessRunError.unsupportedPlatform("runSync is only available on macOS.")
+    }
+}
+#endif

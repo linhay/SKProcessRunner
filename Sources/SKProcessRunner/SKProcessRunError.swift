@@ -3,6 +3,7 @@ import Foundation
 public enum SKProcessRunError: Error, Sendable, Equatable, LocalizedError {
     case executableNotFound(String)
     case invalidExecutable(String)
+    case unsupportedPlatform(String)
     case ptyFailed(String)
     case pipeFailed(String)
     case nonZeroExit(exitCode: Int, stdoutData: Data, stderrData: Data)
@@ -14,6 +15,8 @@ public enum SKProcessRunError: Error, Sendable, Equatable, LocalizedError {
             return "Executable not found on PATH: \(name)"
         case .invalidExecutable(let value):
             return "Invalid executable: \(value)"
+        case .unsupportedPlatform(let message):
+            return "Unsupported platform: \(message)"
         case .ptyFailed(let message):
             return "PTY setup failed: \(message)"
         case .pipeFailed(let message):

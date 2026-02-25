@@ -55,7 +55,13 @@ enum SKProcessPTYSupport {
         posix_spawn_file_actions_addclose(&fileActions, master)
         if let cwd = configuration.cwd {
             _ = cwd.path.withCString { path in
-                posix_spawn_file_actions_addchdir_np(&fileActions, path)
+#if os(macOS)
+                if #available(macOS 26.0, *) {
+                    posix_spawn_file_actions_addchdir(&fileActions, path)
+                } else {
+                    posix_spawn_file_actions_addchdir_np(&fileActions, path)
+                }
+#endif
             }
         }
 
