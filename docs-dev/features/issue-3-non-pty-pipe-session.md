@@ -3,6 +3,7 @@
 ## 背景
 - 当前库已有一次性执行 API 与 PTY 会话 API。
 - JSON-RPC over stdio 需要基于 Pipe 的原始字节流，不适合 PTY。
+- 该能力依赖子进程模型，当前仅在 macOS 提供；iOS 为编译期不可用。
 
 ## 验收场景（BDD）
 1. Given 一个基于 `/bin/sh` 的行回显子进程
@@ -25,3 +26,6 @@
    When 连续发送并读取
    Then 消息数量完整、顺序稳定、无 PTY 污染字符。
 
+6. Given iOS 目标工程
+   When 编译到 `SKProcessPipeSession`
+   Then 编译期提示该类型不可用（而不是运行时失败）。

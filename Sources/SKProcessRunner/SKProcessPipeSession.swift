@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 
+#if os(macOS)
 public actor SKProcessPipeSession {
     public let stdout: AsyncStream<Data>
     public let stderr: AsyncStream<Data>
@@ -221,3 +225,22 @@ public actor SKProcessPipeSession {
         try? stdinWriteHandle.close()
     }
 }
+#else
+@available(iOS, unavailable, message: "SKProcessPipeSession is only available on macOS.")
+public actor SKProcessPipeSession {
+    public let stdout: AsyncStream<Data> = AsyncStream { $0.finish() }
+    public let stderr: AsyncStream<Data> = AsyncStream { $0.finish() }
+    public nonisolated let pid: Int32 = 0
+
+    public init(_ payload: SKProcessPayload) throws {
+        throw SKProcessRunError.pipeFailed("SKProcessPipeSession is only available on macOS.")
+    }
+
+    public func send(_ data: Data) async throws {}
+    public func closeStdin() async throws {}
+    public func wait() async throws -> SKProcessResult {
+        throw SKProcessRunError.pipeFailed("SKProcessPipeSession is only available on macOS.")
+    }
+    public func terminate() async {}
+}
+#endif

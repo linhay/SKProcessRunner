@@ -21,6 +21,15 @@ Designed to be shared by:
 
 PTY support is implemented for Darwin and Glibc. `SKProcessPTYSession` is only covered by tests on macOS.
 
+## Platform Support
+
+| API | macOS | iOS |
+|---|---|---|
+| `run` / `runSync` | Supported | Supported |
+| `runPTY` / `runPTYSync` | Supported | Supported (platform capability may vary) |
+| `SKProcessPTYSession` | Supported | Not supported |
+| `SKProcessPipeSession` | Supported | Not supported (compile-time unavailable) |
+
 ## Installation (SwiftPM)
 
 Add to your `Package.swift` dependencies:
@@ -125,6 +134,7 @@ print("pid:", session.pid, "running:", await session.isRunning(), "exit:", resul
 ## SKProcessPipeSession (Non-PTY Interactive)
 
 `SKProcessPipeSession` provides long-lived bidirectional stdio communication without PTY semantics.
+This API is available on macOS and compile-time unavailable on iOS.
 
 ```swift
 let payload = SKProcessPayload.command("/bin/sh")
@@ -218,6 +228,7 @@ If truncation does not occur, temp file is cleaned up and `fullOutputPath` is `n
 - `executableNotFound`
 - `invalidExecutable`
 - `ptyFailed`
+- `pipeFailed`
 - `nonZeroExit` (includes stdout/stderr data)
 - `timedOut` (includes stdout/stderr data + `truncated`)
 
