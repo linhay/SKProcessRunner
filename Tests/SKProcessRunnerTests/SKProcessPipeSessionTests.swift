@@ -117,6 +117,39 @@ final class SKProcessPipeSessionTests: XCTestCase {
             XCTAssertTrue(output.contains("run-\(i)"))
         }
     }
+
+    func testPipeSessionIsRunningReflectsLifecycle() async throws {
+        let payload = SKProcessPayload.command("/bin/sh")
+            .arguments(["-c", "sleep 0.2"])
+            .timeoutMs(3_000)
+
+        let session = try SKProcessPipeSession(payload)
+        let runningBefore = await session.isRunning()
+        XCTAssertTrue(runningBefore)
+        _ = try await session.wait()
+        let runningAfter = await session.isRunning()
+        XCTAssertFalse(runningAfter)
+    }
+
+    func testPipeSessionSendSignalKillsProcess() async throws {
+        let payload = SKProcessPayload.command("/bin/sh")
+            .arguments(["-c", "sleep 30"])
+            .throwOnNonZeroExit()
+            .timeoutMs(30_000)
+
+        let session = try SKProcessPipeSession(payload)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        await session.sendSignal(SIGKILL)
+
+        do {
+            _ = try await session.wait()
+            XCTFail("Expected non-zero exit after SIGKILL")
+        } catch let SKProcessRunError.nonZeroExit(exitCode, _, _) {
+            XCTAssertNotEqual(exitCode, 0)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
 }
 #else
 final class SKProcessPipeSessionTests: XCTestCase {

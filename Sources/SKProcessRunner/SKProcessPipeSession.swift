@@ -141,6 +141,21 @@ public actor SKProcessPipeSession {
         }
     }
 
+    public func isRunning() -> Bool {
+        !isFinished
+    }
+
+    public func sendSignal(_ signal: Int32) async {
+        guard !isFinished else { return }
+#if canImport(Darwin)
+        Darwin.kill(-pid, signal)
+        Darwin.kill(pid, signal)
+#elseif canImport(Glibc)
+        Glibc.kill(-pid, signal)
+        Glibc.kill(pid, signal)
+#endif
+    }
+
     public func terminate() async {
         guard !isFinished else { return }
         SKProcessTreeTerminator.terminateProcessTree(
@@ -241,6 +256,8 @@ public actor SKProcessPipeSession {
     public func wait() async throws -> SKProcessResult {
         throw SKProcessRunError.pipeFailed("SKProcessPipeSession is only available on macOS.")
     }
+    public func isRunning() -> Bool { false }
+    public func sendSignal(_ signal: Int32) async {}
     public func terminate() async {}
 }
 #endif
