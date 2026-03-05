@@ -158,6 +158,13 @@ let payload = SKProcessPayload.command("/bin/sh")
 let session = try SKProcessPipeSession(payload)
 
 Task {
+    let merged = await session.output
+    for await chunk in merged {
+        print("merged:", String(decoding: chunk, as: UTF8.self), terminator: "")
+    }
+}
+
+Task {
     let stream = await session.stdout
     for await chunk in stream {
         print("stdout:", String(decoding: chunk, as: UTF8.self), terminator: "")
@@ -167,7 +174,9 @@ Task {
 try await session.send(Data("{\"op\":\"ping\"}\n".utf8))
 try await session.closeStdin()
 let result = try await session.wait()
+let mergedText = await session.mergedOutput()
 print("pid:", session.pid, "exit:", result.exitCode)
+print("merged output:", mergedText)
 ```
 
 ## SKProcessPayload Builder

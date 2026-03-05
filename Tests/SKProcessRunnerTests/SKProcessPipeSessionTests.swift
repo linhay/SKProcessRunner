@@ -66,6 +66,32 @@ final class SKProcessPipeSessionTests: XCTestCase {
         XCTAssertTrue(err.contains("err"))
     }
 
+    func testPipeSessionMergedOutputStreamAndSnapshot() async throws {
+        let payload = SKProcessPayload.command("/bin/sh")
+            .arguments(["-c", "echo out; echo err 1>&2"])
+            .timeoutMs(3_000)
+
+        let session = try SKProcessPipeSession(payload)
+        let mergedTask = Task { () -> Data in
+            let stream = await session.output
+            var data = Data()
+            for await chunk in stream { data.append(chunk) }
+            return data
+        }
+
+        let result = try await session.wait()
+        let mergedData = await mergedTask.value
+        let mergedFromAPI = await session.mergedOutputData()
+        let mergedString = String(decoding: mergedData, as: UTF8.self)
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(mergedData, mergedFromAPI)
+        XCTAssertTrue(mergedString.contains("out"))
+        XCTAssertTrue(mergedString.contains("err"))
+        let mergedText = await session.mergedOutput()
+        XCTAssertEqual(mergedText, String(decoding: mergedFromAPI, as: UTF8.self))
+    }
+
     func testPipeSessionTimeoutThrowsTimedOut() async throws {
         let payload = SKProcessPayload.command("/bin/sh")
             .arguments(["-c", "sleep 30"])

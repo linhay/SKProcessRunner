@@ -9,6 +9,7 @@ final class SKProcessRunnerState: @unchecked Sendable {
 
     private(set) var stdoutData = Data()
     private(set) var stderrData = Data()
+    private(set) var mergedData = Data()
     private(set) var truncated = false
     private(set) var fullOutputPath: String?
 
@@ -27,12 +28,19 @@ final class SKProcessRunnerState: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         appendToSpool(data)
         appendCapped(data, to: &stdoutData)
+        appendCapped(data, to: &mergedData)
     }
 
     func appendStderr(_ data: Data) {
         lock.lock(); defer { lock.unlock() }
         appendToSpool(data)
         appendCapped(data, to: &stderrData)
+        appendCapped(data, to: &mergedData)
+    }
+
+    func mergedDataSnapshot() -> Data {
+        lock.lock(); defer { lock.unlock() }
+        return mergedData
     }
 
     func finishIfNeeded() -> Bool {

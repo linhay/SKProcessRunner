@@ -5,6 +5,8 @@ import Darwin
 
 #if os(macOS)
 public actor SKProcessPipeSession {
+    /// A merged output stream (stdout + stderr) in arrival order.
+    public let output: AsyncStream<Data>
     public let stdout: AsyncStream<Data>
     public let stderr: AsyncStream<Data>
     public nonisolated let pid: pid_t
@@ -21,6 +23,7 @@ public actor SKProcessPipeSession {
     private let stdoutReadSource: DispatchSourceRead
     private let stderrReadSource: DispatchSourceRead
     private let timer: DispatchSourceTimer
+    private var outputContinuation: AsyncStream<Data>.Continuation?
     private var stdoutContinuation: AsyncStream<Data>.Continuation?
     private var stderrContinuation: AsyncStream<Data>.Continuation?
     private var waiters: [CheckedContinuation<SKProcessResult, Error>] = []
@@ -64,6 +67,12 @@ public actor SKProcessPipeSession {
         self.stdoutReadHandle = stdoutPipe.fileHandleForReading
         self.stderrReadHandle = stderrPipe.fileHandleForReading
         self.stdinWriteHandle = stdinPipe.fileHandleForWriting
+
+        var outputCont: AsyncStream<Data>.Continuation?
+        self.output = AsyncStream<Data> { continuation in
+            outputCont = continuation
+        }
+        self.outputContinuation = outputCont
 
         var stdoutCont: AsyncStream<Data>.Continuation?
         self.stdout = AsyncStream<Data> { continuation in
@@ -141,6 +150,16 @@ public actor SKProcessPipeSession {
         }
     }
 
+    /// Returns the merged output snapshot (stdout + stderr in arrival order).
+    public func mergedOutputData() -> Data {
+        state.mergedDataSnapshot()
+    }
+
+    /// UTF-8 best-effort helper of `mergedOutputData()`.
+    public func mergedOutput() -> String {
+        String(decoding: state.mergedDataSnapshot(), as: UTF8.self)
+    }
+
     public func isRunning() -> Bool {
         !isFinished
     }
@@ -168,6 +187,7 @@ public actor SKProcessPipeSession {
         guard !isFinished else { return }
         guard !data.isEmpty else { return }
         state.appendStdout(data)
+        outputContinuation?.yield(data)
         stdoutContinuation?.yield(data)
     }
 
@@ -175,6 +195,7 @@ public actor SKProcessPipeSession {
         guard !isFinished else { return }
         guard !data.isEmpty else { return }
         state.appendStderr(data)
+        outputContinuation?.yield(data)
         stderrContinuation?.yield(data)
     }
 
@@ -235,6 +256,7 @@ public actor SKProcessPipeSession {
         state.appendStdout(stdoutReadHandle.readDataToEndOfFile())
         state.appendStderr(stderrReadHandle.readDataToEndOfFile())
 
+        outputContinuation?.finish()
         stdoutContinuation?.finish()
         stderrContinuation?.finish()
         try? stdinWriteHandle.close()
@@ -243,6 +265,7 @@ public actor SKProcessPipeSession {
 #else
 @available(iOS, unavailable, message: "SKProcessPipeSession is only available on macOS.")
 public actor SKProcessPipeSession {
+    public let output: AsyncStream<Data> = AsyncStream { $0.finish() }
     public let stdout: AsyncStream<Data> = AsyncStream { $0.finish() }
     public let stderr: AsyncStream<Data> = AsyncStream { $0.finish() }
     public nonisolated let pid: Int32 = 0
@@ -256,6 +279,8 @@ public actor SKProcessPipeSession {
     public func wait() async throws -> SKProcessResult {
         throw SKProcessRunError.pipeFailed("SKProcessPipeSession is only available on macOS.")
     }
+    public func mergedOutputData() -> Data { Data() }
+    public func mergedOutput() -> String { "" }
     public func isRunning() -> Bool { false }
     public func sendSignal(_ signal: Int32) async {}
     public func terminate() async {}
