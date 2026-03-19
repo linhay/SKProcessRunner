@@ -421,6 +421,23 @@ final class SKProcessPTYSessionTests: XCTestCase {
 #endif
     }
 
+    func testPTYSessionRapidTerminateDoesNotCrash() async throws {
+#if os(macOS)
+        for _ in 0..<20 {
+            let payload = SKProcessPayload.executableURL(URL(fileURLWithPath: "/bin/sh"))
+                .arguments(["-c", "sleep 0.1; echo done"])
+                .timeoutMs(2_000)
+                .maxOutputBytes(64 * 1024)
+                .pty(.init(rows: 24, cols: 80))
+            let session = try SKProcessPTYSession(payload)
+            await session.terminate()
+            _ = try? await session.wait()
+        }
+#else
+        throw XCTSkip("SKProcessPTYSession is only supported on macOS in tests.")
+#endif
+    }
+
     func testPTYSessionCodex() async throws {
 #if os(macOS)
         guard let codexURL = SKProcessRunner.resolveExecutableInUserShellSync(named: "codex") else {

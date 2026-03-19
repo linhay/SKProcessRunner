@@ -92,13 +92,13 @@ public actor SKProcessPipeSession {
         self.stderrReadSource = DispatchSource.makeReadSource(fileDescriptor: stderrFD, queue: .global(qos: .utility))
         self.timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
 
-        stdoutReadSource.setEventHandler { [stdoutReadHandle] in
-            let data = stdoutReadHandle.availableData
+        stdoutReadSource.setEventHandler { [stdoutFD] in
+            let data = Self.readChunk(from: stdoutFD)
             guard !data.isEmpty else { return }
             Task { await self.handleStdoutRead(data) }
         }
-        stderrReadSource.setEventHandler { [stderrReadHandle] in
-            let data = stderrReadHandle.availableData
+        stderrReadSource.setEventHandler { [stderrFD] in
+            let data = Self.readChunk(from: stderrFD)
             guard !data.isEmpty else { return }
             Task { await self.handleStderrRead(data) }
         }
@@ -260,6 +260,24 @@ public actor SKProcessPipeSession {
         stdoutContinuation?.finish()
         stderrContinuation?.finish()
         try? stdinWriteHandle.close()
+    }
+
+    private nonisolated static func readChunk(from fd: Int32) -> Data {
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        let count = read(fd, &buffer, buffer.count)
+        if count > 0 {
+            return Data(buffer.prefix(Int(count)))
+        }
+
+        if count == 0 {
+            return Data()
+        }
+
+        if errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK {
+            return Data()
+        }
+
+        return Data()
     }
 }
 #else

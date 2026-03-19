@@ -62,8 +62,8 @@ public actor SKProcessPTYSession {
         self.readSource = DispatchSource.makeReadSource(fileDescriptor: masterFD, queue: .global(qos: .utility))
         self.timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
 
-        self.readSource.setEventHandler { [masterHandle] in
-            let data = masterHandle.availableData
+        self.readSource.setEventHandler { [masterFD] in
+            let data = Self.readChunk(from: masterFD)
             guard !data.isEmpty else { return }
             Task { await self.handleRead(data) }
         }
@@ -187,5 +187,23 @@ public actor SKProcessPTYSession {
             for waiter in waiters { waiter.resume(returning: result) }
         }
         waiters.removeAll()
+    }
+
+    private nonisolated static func readChunk(from fd: Int32) -> Data {
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        let count = read(fd, &buffer, buffer.count)
+        if count > 0 {
+            return Data(buffer.prefix(Int(count)))
+        }
+
+        if count == 0 {
+            return Data()
+        }
+
+        if errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK {
+            return Data()
+        }
+
+        return Data()
     }
 }
