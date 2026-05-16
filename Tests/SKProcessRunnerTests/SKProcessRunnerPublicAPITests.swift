@@ -9,6 +9,35 @@ import Glibc
 
 #if os(macOS)
 final class SKProcessRunnerPublicAPITests: XCTestCase {
+    func testRunErrorKeepsOriginalExhaustiveCaseSet() {
+        let error = SKProcessRunError.executableNotFound("git")
+        let message: String
+        switch error {
+        case .executableNotFound(let name):
+            message = name
+        case .invalidExecutable(let value):
+            message = value
+        case .ptyFailed(let value):
+            message = value
+        case .nonZeroExit(let exitCode, _, _):
+            message = "\(exitCode)"
+        case .timedOut(let timeoutMs, _, _, _):
+            message = "\(timeoutMs)"
+        }
+        XCTAssertEqual(message, "git")
+    }
+
+    func testRunErrorCompatibilityFactories() {
+        XCTAssertEqual(
+            SKProcessRunError.unsupportedPlatform("run is only available on macOS.").errorDescription,
+            "Invalid executable: Unsupported platform: run is only available on macOS."
+        )
+        XCTAssertEqual(
+            SKProcessRunError.pipeFailed("stdin is closed").errorDescription,
+            "PTY setup failed: Pipe session failed: stdin is closed"
+        )
+    }
+
     func testResolveExecutableWithPath() throws {
         let url = try SKProcessRunner.resolveExecutable("/bin/echo")
         XCTAssertEqual(url.path, "/bin/echo")

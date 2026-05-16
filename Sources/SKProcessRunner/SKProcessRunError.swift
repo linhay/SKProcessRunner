@@ -3,11 +3,17 @@ import Foundation
 public enum SKProcessRunError: Error, Sendable, Equatable, LocalizedError {
     case executableNotFound(String)
     case invalidExecutable(String)
-    case unsupportedPlatform(String)
     case ptyFailed(String)
-    case pipeFailed(String)
     case nonZeroExit(exitCode: Int, stdoutData: Data, stderrData: Data)
     case timedOut(timeoutMs: Int, stdoutData: Data, stderrData: Data, truncated: Bool)
+
+    public static func unsupportedPlatform(_ message: String) -> SKProcessRunError {
+        .invalidExecutable("Unsupported platform: \(message)")
+    }
+
+    public static func pipeFailed(_ message: String) -> SKProcessRunError {
+        .ptyFailed("Pipe session failed: \(message)")
+    }
 
     public var errorDescription: String? {
         switch self {
@@ -15,12 +21,8 @@ public enum SKProcessRunError: Error, Sendable, Equatable, LocalizedError {
             return "Executable not found on PATH: \(name)"
         case .invalidExecutable(let value):
             return "Invalid executable: \(value)"
-        case .unsupportedPlatform(let message):
-            return "Unsupported platform: \(message)"
         case .ptyFailed(let message):
             return "PTY setup failed: \(message)"
-        case .pipeFailed(let message):
-            return "Pipe session failed: \(message)"
         case .nonZeroExit(let code, let stdoutData, let stderrData):
             let out = String(data: stdoutData, encoding: .utf8) ?? ""
             let err = String(data: stderrData, encoding: .utf8) ?? ""
